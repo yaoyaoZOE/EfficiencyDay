@@ -8,6 +8,7 @@ __pycache__/
 .env.*
 !.env.example
 backend/data/
+backups/
 node_modules/
 dist/
 coverage/

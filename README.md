@@ -1,6 +1,6 @@
 # EfficiencyDay
 
-个人日常工作项管理工具。当前仓库提供可运行的开发骨架，尚未实现登录、任务管理或生产部署。
+个人日常工作项管理工具。当前仓库提供可运行的开发骨架和 Docker Compose 部署配置，尚未实现登录或任务管理。
 
 ## 技术栈
 
@@ -98,7 +98,84 @@ VS Code 也提供 `test: backend`、`test: frontend` 和 `build: frontend` 任�
 
 前端 `npm run build` 包含 TypeScript 检查。测试使用单 worker 的线程池，避免本机 Windows 下子进程测试池启动超时。
 
-`npm run preview` 在同一端口 8327 预览构建产物，继承开发 API 代理，需单独保持后端运行，并先停止占用该端口的开发服务。它不是生产服务器，生产环境以后由 Nginx 统一代理。
+`npm run preview` 在同一端口 8327 预览构建产物，继承开发 API 代理，需单独保持后端运行，并先停止占用该端口的开发服务。它不是生产服务器，容器部署由 Nginx 统一代理。
+
+## Docker Compose 部署
+
+需要 Docker Engine 和 Docker Compose v2；Windows 可使用 Docker Desktop，切换为 Linux 容器。以下 PowerShell 命令均从仓库根目录执行，不需要本机安装 Python 或 Node.js。首次构建需要访问镜像源、PyPI 和 npm。
+
+```powershell
+docker compose config --quiet
+docker compose up -d --build --wait --wait-timeout 120
+docker compose ps
+curl.exe --fail http://127.0.0.1:8327/
+curl.exe --fail http://127.0.0.1:8327/api/v1/health/ready
+```
+
+访问 http://127.0.0.1:8327 查看页面。默认端口与本地开发前端相同，启动前请先停止占用该端口的开发服务，或修改端口。
+
+- 前端使用 Node.js 22 多阶段构建，最终镜像仅保留 Nginx 和静态产物，不运行 Vite 开发服务器。Nginx 提供 SPA 路由回退，并将 `/api/` 请求原样代理到后端；API 错误不会回退成 HTML。
+- 后端使用 Python 3.14，以非 root 用户运行，按现有锁文件约束安装运行依赖，不安装测试和 lint 工具。每次启动先执行 `alembic upgrade head`，成功后才启动单进程 Uvicorn；迁移失败将输出日志并退出，不会跳过迁移继续提供服务。
+- 后端就绪检查通过后，Compose 才启动前端。后端仅通过容器网络访问，不发布 6931 端口。两端都有健康检查和 `unless-stopped` 重启策略；健康检查失败本身不会触发 Docker 自动重启。
+- SQLite 文件及 WAL 文件保存在 `backend-data` 命名卷的 `/app/data` 中，不会写入镜像，也不会自动导入本地开发数据库。构建上下文使用白名单，不包含本地 `.env`、数据库、虚拟环境或 `node_modules`。
+
+### 监听地址和端口
+
+默认仅监听宿主机 `127.0.0.1:8327`。可以通过 PowerShell 环境变量调整，或在仓库根目录创建不提交的 `.env` 文件（不是 `backend\.env`）：
+
+```dotenv
+EFFICIENCYDAY_BIND_ADDRESS=127.0.0.1
+EFFICIENCYDAY_PORT=8327
+```
+
+修改后重新执行 `docker compose up -d --wait`。需要通过局域网访问时，可显式将监听地址设置为 `0.0.0.0`，并配置宿主机防火墙。**当前应用没有身份认证，部署配置不提供 HTTPS，不应直接暴露到公网。** 公网部署还需要外层 TLS 反向代理、访问控制及相应安全配置。
+
+容器固定使用 `/app/data/efficiencyday.db`，不会读取宿主机 `backend\.env`。不要扩容后端副本；当前 SQLite 和启动迁移方案面向单实例部署。
+
+### 日志、升级与停止
+
+```powershell
+docker compose logs --tail 100 backend frontend
+# 升级前先按下文备份数据库，再更新源码并重建。
+docker compose build --pull
+docker compose up -d --wait --wait-timeout 120
+# 停止并移除容器、网络，但保留数据库卷。
+docker compose down
+```
+
+基础镜像使用版本系列标签，后端和前端应用依赖分别由现有锁文件约束；基础镜像更新可能改变系统依赖，需要重新构建并验证。迁移失败时查看 `docker compose logs backend`，修复原因后再启动，不要删除数据卷来绕过问题。
+
+`docker compose down -v` **会永久删除数据库卷**，只适用于明确需要清空数据的场景。保持相同的 Compose 项目名（默认来自仓库目录名）；换目录或使用不同的 `-p` 会创建另一组卷，看起来像是空数据库。
+
+### 数据备份和恢复
+
+为确保 SQLite 数据及 WAL 一致，采用停机备份整个数据目录。备份包含完整数据库，请保存在安全位置，不要提交到 Git。
+
+```powershell
+# 先停止所有写入，再将整个数据目录复制到宿主机。
+docker compose stop frontend backend
+New-Item -ItemType Directory -Force .\backups | Out-Null
+$backup = Join-Path (Resolve-Path .\backups).Path ("data-" + (Get-Date -Format "yyyyMMdd-HHmmss"))
+docker compose cp backend:/app/data $backup
+# 确认上一条命令成功，且备份目录中存在 efficiencyday.db 后再继续。
+docker compose up -d --wait --wait-timeout 120
+```
+
+备份恢复到空卷时，可按以下步骤操作。先用 `docker compose down` 保留现有卷，然后使用独立项目名创建全新容器和卷，避免覆盖当前数据。将备份路径替换为实际绝对路径：
+
+```powershell
+$backup = "D:\Backups\data-20261019-160000"
+docker compose -p efficiencyday-restore create backend
+docker compose -p efficiencyday-restore cp "${backup}\." backend:/app/data
+# cp 可能改变文件所有者；启动非 root 后端前修正卷权限。
+docker compose -p efficiencyday-restore run --rm --no-deps --user root backend chown -R 10001:10001 /app/data
+docker compose -p efficiencyday-restore up -d --wait --wait-timeout 120
+curl.exe --fail http://127.0.0.1:8327/api/v1/health/ready
+```
+
+仅在每一步成功后继续。恢复环境启动时会迁移到当前源码的数据库版本，因此应使用兼容版本，恢复前保留原始备份。升级后降级镜像不保证兼容已经迁移的数据库；回退应使用升级前的数据备份和相应旧版源码。
+
+可在测试部署中执行一次 `docker compose down` 后重新 `up`，再访问就绪接口，确认保留卷后仍可启动。更严格的持久化验收应先在测试数据库写入已知数据，重建容器后核对该数据，而不只是检查健康状态。
 
 ## 数据库迁移
 
