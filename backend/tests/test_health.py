@@ -1,17 +1,9 @@
 from pathlib import Path
 
 from alembic import command
-from alembic.config import Config
+from conftest import make_alembic_config, migrate_database
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, text
-
-BACKEND_ROOT = Path(__file__).resolve().parents[1]
-
-
-def migrate(database_path: Path) -> None:
-    config = Config(str(BACKEND_ROOT / "alembic.ini"))
-    config.set_main_option("sqlalchemy.url", f"sqlite:///{database_path.as_posix()}")
-    command.upgrade(config, "head")
 
 
 def test_liveness_does_not_require_migrated_database(tmp_path: Path) -> None:
@@ -42,7 +34,7 @@ def test_readiness_checks_migration_and_database_settings(tmp_path: Path) -> Non
     from app.main import create_app
 
     database_path = tmp_path / "test.db"
-    migrate(database_path)
+    migrate_database(database_path)
     settings = Settings(database_path=database_path, _env_file=None)
     engine = create_database_engine(settings)
     try:
@@ -74,7 +66,7 @@ def test_readiness_rejects_unknown_migration(tmp_path: Path) -> None:
     from app.main import create_app
 
     database_path = tmp_path / "test.db"
-    migrate(database_path)
+    migrate_database(database_path)
     engine = create_engine(f"sqlite:///{database_path.as_posix()}")
     try:
         with engine.begin() as connection:
@@ -89,15 +81,14 @@ def test_initial_migration_round_trip(tmp_path: Path) -> None:
     from sqlalchemy import inspect
 
     database_path = tmp_path / "test.db"
-    config = Config(str(BACKEND_ROOT / "alembic.ini"))
-    config.set_main_option("sqlalchemy.url", f"sqlite:///{database_path.as_posix()}")
-    command.upgrade(config, "head")
+    migrate_database(database_path)
     engine = create_engine(f"sqlite:///{database_path.as_posix()}")
     try:
         assert "app_metadata" in inspect(engine).get_table_names()
+        config = make_alembic_config(database_path)
         command.downgrade(config, "base")
         assert "app_metadata" not in inspect(engine).get_table_names()
-        command.upgrade(config, "head")
+        migrate_database(database_path)
         assert "app_metadata" in inspect(engine).get_table_names()
     finally:
         engine.dispose()
