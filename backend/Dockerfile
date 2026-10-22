@@ -20,4 +20,4 @@ COPY migrations ./migrations
 USER app
 EXPOSE 6931
 
-CMD ["sh", "-c", "python -m alembic upgrade head && exec python -m uvicorn app.main:app --host 0.0.0.0 --port 6931"]
+CMD ["python", "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "6931"]
