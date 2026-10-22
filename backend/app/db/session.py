@@ -1,6 +1,9 @@
+from collections.abc import Generator
 from sqlite3 import Connection
 
+from fastapi import Request
 from sqlalchemy import URL, Engine, create_engine, event
+from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import ConnectionPoolEntry
 
 from app.core.config import Settings
@@ -25,3 +28,12 @@ def create_database_engine(settings: Settings) -> Engine:
     )
     event.listen(engine, "connect", configure_sqlite)
     return engine
+
+
+def create_session_factory(engine: Engine) -> sessionmaker[Session]:
+    return sessionmaker(bind=engine, expire_on_commit=False)
+
+
+def get_db(request: Request) -> Generator[Session, None, None]:
+    with request.app.state.session_factory() as session:
+        yield session

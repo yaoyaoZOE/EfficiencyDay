@@ -35,7 +35,12 @@ def test_readiness_checks_migration_and_database_settings(tmp_path: Path) -> Non
 
     database_path = tmp_path / "test.db"
     migrate_database(database_path)
-    settings = Settings(database_path=database_path, _env_file=None)
+    settings = Settings(
+        database_path=database_path,
+        initial_username="health-user",
+        initial_password="health-password",
+        _env_file=None,
+    )
     engine = create_database_engine(settings)
     try:
         with engine.connect() as connection:
@@ -56,7 +61,9 @@ def test_readiness_rejects_unavailable_database(tmp_path: Path) -> None:
 
     settings = Settings(database_path=tmp_path, _env_file=None)
     with TestClient(create_app(settings)) as client:
+        live_response = client.get("/api/v1/health/live")
         response = client.get("/api/v1/health/ready")
+    assert live_response.status_code == 200
     assert response.status_code == 503
     assert response.json()["detail"] == "Database is unavailable."
 

@@ -1,14 +1,11 @@
 import logging
 from typing import Literal
 
-from alembic.config import Config
-from alembic.migration import MigrationContext
-from alembic.script import ScriptDirectory
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 from sqlalchemy.exc import SQLAlchemyError
 
-from app.core.config import BACKEND_ROOT
+from app.db.migrations import get_current_revision, get_expected_revision
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/health", tags=["health"])
@@ -31,11 +28,9 @@ def liveness() -> LiveResponse:
 
 @router.get("/ready", response_model=ReadyResponse, responses={503: {"description": "Not ready"}})
 def readiness(request: Request) -> ReadyResponse:
-    config = Config(str(BACKEND_ROOT / "alembic.ini"))
-    expected_revision = ScriptDirectory.from_config(config).get_current_head()
+    expected_revision = get_expected_revision()
     try:
-        with request.app.state.engine.connect() as connection:
-            revision = MigrationContext.configure(connection).get_current_revision()
+        revision = get_current_revision(request.app.state.engine)
     except SQLAlchemyError as exc:
         logger.exception("Database readiness check failed")
         raise HTTPException(status_code=503, detail="Database is unavailable.") from exc
