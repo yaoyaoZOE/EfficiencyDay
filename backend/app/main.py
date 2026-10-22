@@ -5,6 +5,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from sqlalchemy.exc import SQLAlchemyError
 
+from app.api.auth import router as auth_router
 from app.api.health import router as health_router
 from app.core.config import Settings
 from app.db.migrations import get_current_revision, get_expected_revision
@@ -35,7 +36,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             engine.dispose()
 
     application = FastAPI(title="EfficiencyDay API", version="0.1.0", lifespan=lifespan)
+    application.state.settings = settings
     application.include_router(health_router, prefix="/api/v1")
+    application.include_router(auth_router, prefix="/api/v1")
     return application
 
 
