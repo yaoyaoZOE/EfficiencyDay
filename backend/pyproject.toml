@@ -13,6 +13,8 @@ dependencies = [
     "sqlalchemy>=2.0,<2.1",
     "alembic>=1.15,<2",
     "pydantic-settings>=2.8,<3",
+    "argon2-cffi>=23.1,<27",
+    "tzdata>=2025.2,<2027",
 ]
 
 [project.optional-dependencies]

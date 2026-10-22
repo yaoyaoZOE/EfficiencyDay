@@ -10,6 +10,12 @@ anyio==4.15.1
     # via
     #   httpx2
     #   starlette
+argon2-cffi==25.1.0
+    # via efficiencyday-backend (backend/pyproject.toml)
+argon2-cffi-bindings==26.1.0
+    # via argon2-cffi
+cffi==2.1.1
+    # via argon2-cffi-bindings
 click==8.5.0
     # via uvicorn
 colorama==0.4.6
@@ -42,6 +48,8 @@ packaging==26.3
     # via pytest
 pluggy==1.7.0
     # via pytest
+pycparser==3.11
+    # via cffi
 pydantic==2.14.1
     # via
     #   fastapi
@@ -84,5 +92,7 @@ typing-inspection==0.4.4
     #   fastapi
     #   pydantic
     #   pydantic-settings
+tzdata==2026.5
+    # via efficiencyday-backend (backend/pyproject.toml)
 uvicorn==0.54.0
     # via efficiencyday-backend (backend/pyproject.toml)

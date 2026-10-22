@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from pydantic import field_validator
+from pydantic import PositiveInt, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 BACKEND_ROOT = Path(__file__).resolve().parents[2]
@@ -15,6 +15,9 @@ class Settings(BaseSettings):
     )
 
     database_path: Path = BACKEND_ROOT / "data" / "efficiencyday.db"
+    initial_username: str | None = None
+    initial_password: SecretStr | None = None
+    session_ttl_days: PositiveInt = 7
 
     @field_validator("database_path")
     @classmethod
