@@ -2,14 +2,18 @@ from __future__ import annotations
 
 from datetime import timedelta
 from pathlib import Path
+from unittest.mock import patch
 
+import pytest
+from argon2 import PasswordHasher, extract_parameters
+from argon2.exceptions import VerifyMismatchError
 from conftest import migrate_database
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 
 from app.core.config import Settings
 from app.core.time import utc_now
-from app.db.models import SessionRecord
+from app.db.models import SessionRecord, User
 from app.main import create_app
 
 
@@ -79,6 +83,7 @@ def test_login_sets_secure_cookie_and_persists_only_session_token_hash(
             assert record.token_hash == hash_token(raw_token)
             assert record.token_hash != raw_token
             assert record.csrf_token
+            assert record.expires_at - record.created_at == timedelta(days=1)
 
 
 def test_invalid_username_and_password_have_same_generic_error(tmp_path: Path) -> None:
@@ -96,6 +101,45 @@ def test_invalid_username_and_password_have_same_generic_error(tmp_path: Path) -
 
     assert unknown_user.status_code == wrong_password.status_code == 401
     assert unknown_user.json() == wrong_password.json()
+
+
+@pytest.mark.parametrize(
+    ("username", "password"),
+    [
+        ("missing", "wrong"),
+        ("missing", "correct horse battery staple"),
+        ("admin", "wrong"),
+    ],
+)
+def test_failed_login_always_verifies_one_valid_argon2id_hash(
+    tmp_path: Path, username: str, password: str
+) -> None:
+    from app.services import auth
+
+    with _client(tmp_path / "auth.db") as client:
+        with client.app.state.session_factory() as session:
+            stored_hash = session.scalar(select(User.password_hash))
+
+        with patch.object(auth, "verify_password", wraps=auth.verify_password) as verify:
+            response = client.post(
+                "/api/v1/auth/login",
+                json={"username": username, "password": password},
+                headers={"Origin": "https://testserver"},
+            )
+
+        assert response.status_code == 401
+        assert response.json() == {"detail": "Invalid username or password."}
+        verify.assert_called_once()
+        checked_password, encoded = verify.call_args.args
+        assert checked_password == password
+        assert encoded.startswith("$argon2id$")
+        assert extract_parameters(encoded) == extract_parameters(stored_hash)
+        with pytest.raises(VerifyMismatchError):
+            PasswordHasher().verify(encoded, password)
+        assert (encoded == stored_hash) == (username == "admin")
+        assert client.cookies.get("efficiencyday_session") is None
+        with client.app.state.session_factory() as session:
+            assert session.scalar(select(SessionRecord)) is None
 
 
 def test_me_returns_authenticated_user_timezone_and_csrf_token(tmp_path: Path) -> None:

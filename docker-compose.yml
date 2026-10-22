@@ -6,6 +6,7 @@ services:
     environment:
       EFFICIENCYDAY_DATABASE_PATH: /app/data/efficiencyday.db
       EFFICIENCYDAY_PUBLIC_ORIGIN: ${EFFICIENCYDAY_PUBLIC_ORIGIN:-}
+      EFFICIENCYDAY_SESSION_TTL_DAYS: ${EFFICIENCYDAY_SESSION_TTL_DAYS:-7}
     volumes:
       - backend-data:/app/data
     healthcheck:

@@ -4,7 +4,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings
-from app.core.security import create_opaque_token, hash_token, verify_password
+from app.core.security import DUMMY_PASSWORD_HASH, create_opaque_token, hash_token, verify_password
 from app.core.time import utc_now
 from app.db.models import SessionRecord, User
 
@@ -16,7 +16,9 @@ def authenticate_user(
     settings: Settings | None = None,
 ) -> tuple[User, SessionRecord, str] | None:
     user = session.scalar(select(User).where(User.username == username))
-    if user is None or not verify_password(password, user.password_hash):
+    password_hash = user.password_hash if user is not None else DUMMY_PASSWORD_HASH
+    password_verified = verify_password(password, password_hash)
+    if user is None or not password_verified:
         return None
 
     current_time = utc_now()

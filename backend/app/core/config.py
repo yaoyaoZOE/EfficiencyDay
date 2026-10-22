@@ -29,6 +29,8 @@ class Settings(BaseSettings):
             if not value:
                 return None
             parsed = urlsplit(value)
+            if parsed.username is not None or parsed.password is not None:
+                raise ValueError("public_origin must not include userinfo")
             if parsed.path or "?" in value or "#" in value:
                 raise ValueError("public_origin must not include a path, query, or fragment")
         return value
@@ -36,6 +38,8 @@ class Settings(BaseSettings):
     @field_validator("public_origin")
     @classmethod
     def public_origin_must_be_an_origin(cls, value: AnyHttpUrl | None) -> AnyHttpUrl | None:
+        if value is not None and (value.username is not None or value.password is not None):
+            raise ValueError("public_origin must not include userinfo")
         if value is not None and (
             value.path not in ("", "/") or value.query is not None or value.fragment is not None
         ):

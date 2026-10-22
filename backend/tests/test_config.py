@@ -1,5 +1,7 @@
+from pathlib import Path
+
 import pytest
-from pydantic import ValidationError
+from pydantic import AnyHttpUrl, ValidationError
 
 from app.core.config import Settings
 
@@ -35,3 +37,45 @@ def test_public_origin_cannot_include_path_query_or_fragment() -> None:
     ):
         with pytest.raises(ValidationError):
             Settings(public_origin=value, _env_file=None)
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "https://user@example.com",
+        "https://user:password@example.com",
+        "https://:password@example.com",
+        "https://user:@example.com",
+        "https://@example.com",
+        "https://:@example.com",
+        AnyHttpUrl("https://user@example.com"),
+        AnyHttpUrl("https://user:password@example.com"),
+    ],
+)
+def test_public_origin_cannot_include_userinfo(value: str | AnyHttpUrl) -> None:
+    with pytest.raises(ValidationError, match="userinfo"):
+        Settings(public_origin=value, _env_file=None)
+
+
+def test_session_lifetime_is_loaded_from_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("EFFICIENCYDAY_SESSION_TTL_DAYS", "3")
+
+    assert Settings(_env_file=None).session_ttl_days == 3
+
+
+def test_compose_forwards_session_lifetime_with_seven_day_default() -> None:
+    root = Path(__file__).resolve().parents[2]
+    compose = (root / "docker-compose.yml").read_text(encoding="utf-8")
+
+    assert (
+        "      EFFICIENCYDAY_SESSION_TTL_DAYS: ${EFFICIENCYDAY_SESSION_TTL_DAYS:-7}"
+        in compose.split("  frontend:", 1)[0]
+    )
+
+
+@pytest.mark.parametrize("relative_path", [".env.example", "backend/.env.example"])
+def test_env_examples_document_session_lifetime(relative_path: str) -> None:
+    root = Path(__file__).resolve().parents[2]
+    example = (root / relative_path).read_text(encoding="utf-8")
+
+    assert "EFFICIENCYDAY_SESSION_TTL_DAYS=7" in example.splitlines()

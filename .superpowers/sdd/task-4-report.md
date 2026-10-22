@@ -99,3 +99,140 @@ git diff --check
 ```
 
 The old proxy-dependent-origin concern above is superseded: browser-origin validation now uses only the explicit public-origin setting.
+
+## Remaining Task 4 review fixes (2026-10-22)
+
+**Status:** Fixed and verified.
+**Fix commit:** The follow-up commit containing this section.
+**Starting HEAD:** `142fe93` (the approved brief update following implementation through `a60acac`).
+
+### Scope and implementation
+
+- Compose now forwards `EFFICIENCYDAY_SESSION_TTL_DAYS` with `${EFFICIENCYDAY_SESSION_TTL_DAYS:-7}`. Both env examples document the positive lifetime and default of 7 days.
+- Authentication selects either the user's stored hash or a fixed valid dummy Argon2id hash, then calls `verify_password` exactly once before testing user existence and the verification result. The dummy was generated once with `PasswordHasher()` defaults (`m=65536,t=3,p=4`); it is not generated per request. Unknown users and wrong passwords still receive the same generic 401 and create no session or cookie.
+- Public-origin configuration rejects username/password userinfo in both raw strings and already parsed `AnyHttpUrl` values. Raw strings with empty userinfo are also rejected before URL normalization can discard it.
+- No changes were made to configured-origin matching, forwarded-header handling, successful login, cookie attributes, session revocation, migrations, or database configuration.
+
+### Tests added
+
+- A `patch.object(..., wraps=auth.verify_password)` spy delegates to the real verifier. Unknown users (including with the real admin password) and a known user with a wrong password each invoke verification once. The tests also validate the hash with real Argon2, compare its parameters with the stored hash, check generic 401 details, and assert that no session record or cookie is created.
+- Eight userinfo cases cover username-only, username/password, password-only, empty credential components, and parsed URL inputs.
+- TTL coverage checks the Compose backend mapping, both env examples, environment-to-Settings loading, and persisted session expiry using the explicitly configured one-day lifetime.
+- All authentication database paths remain under pytest's `tmp_path`; migration helpers target those isolated databases. No development database was migrated or used.
+
+### RED: tests before production edits
+
+The editor test runner reported `No tests found in the files. Ensure the correct absolute paths are passed to the tool.` The requested interpreter was then used directly for all recorded test runs.
+
+```powershell
+$env:UV_PROJECT_ENVIRONMENT='D:\PersonalProject\EfficiencyDay\.venv'
+& 'D:\PersonalProject\EfficiencyDay\.venv\Scripts\python.exe' -m pytest backend\tests\test_auth.py backend\tests\test_config.py -q --tb=short
+```
+
+Exact result:
+
+```text
+12 failed, 17 passed in 14.05s
+```
+
+Exit code: **1**. All 12 failures were the intended missing behavior:
+
+- Two unknown-user cases: `AssertionError: Expected 'verify_password' to have been called once. Called 0 times.`
+- Eight userinfo inputs: `Failed: DID NOT RAISE ValidationError`.
+- Compose forwarding assertion failed because its backend environment lacked the TTL entry.
+- Root env example assertion failed because it lacked `EFFICIENCYDAY_SESSION_TTL_DAYS=7`.
+
+The existing backend env example, Settings environment loading, known-user verification, session TTL persistence, and prior auth/origin behavior passed in RED. No production file was edited until this run completed.
+
+### GREEN and regression verification
+
+All Python commands below used Python **3.14.0** at the requested root `.venv`, with `UV_PROJECT_ENVIRONMENT=D:\PersonalProject\EfficiencyDay\.venv`.
+
+```powershell
+& 'D:\PersonalProject\EfficiencyDay\.venv\Scripts\python.exe' -m pytest backend\tests\test_auth.py backend\tests\test_config.py -q --tb=short
+```
+
+```text
+.............................                                            [100%]
+29 passed in 14.73s
+```
+
+```powershell
+& 'D:\PersonalProject\EfficiencyDay\.venv\Scripts\python.exe' -m pytest backend\tests\test_auth.py -q
+```
+
+```text
+.............                                                            [100%]
+13 passed in 15.56s
+```
+
+```powershell
+& 'D:\PersonalProject\EfficiencyDay\.venv\Scripts\python.exe' -m pytest backend\tests\test_config.py -q
+```
+
+```text
+................                                                         [100%]
+16 passed in 0.54s
+```
+
+```powershell
+& 'D:\PersonalProject\EfficiencyDay\.venv\Scripts\python.exe' -m pytest backend\tests -q
+```
+
+```text
+......................................................                   [100%]
+54 passed in 23.97s
+```
+
+```powershell
+& 'D:\PersonalProject\EfficiencyDay\.venv\Scripts\python.exe' -m ruff check backend
+```
+
+```text
+All checks passed!
+```
+
+All GREEN/regression commands exited **0**. `git diff --check` also exited **0** with no output. The editor Problems check returned `No errors found` for all five changed Python files.
+
+### Compose config validation
+
+Docker/Compose was not installed or on PATH. The initial `docker compose version` failed with `The term 'docker' is not recognized`. An attempt to download the official standalone release with `gh release download` returned `401 Unauthorized`; downloading the public release URLs with `curl.exe` succeeded.
+
+The temporary official `docker/compose` v5.6.1 Windows x86-64 binary was checked against its published SHA-256 file before execution:
+
+```text
+Official Compose SHA256 verified
+Docker Compose version v5.6.1
+```
+
+The standalone binary was used only for configuration validation, without a Docker daemon, image builds, or container startup. With `$compose` pointing at that binary, these commands were run:
+
+```powershell
+Remove-Item Env:EFFICIENCYDAY_SESSION_TTL_DAYS -ErrorAction SilentlyContinue
+& $compose --env-file .env.example -f docker-compose.yml config --quiet
+# The following JSON configurations were parsed with ConvertFrom-Json and
+# checked with explicit throwing assertions on services.backend.environment.
+& $compose --env-file .env.example -f docker-compose.yml config --format json
+& $compose --env-file NUL -f docker-compose.yml config --format json
+$env:EFFICIENCYDAY_SESSION_TTL_DAYS='3'
+$env:EFFICIENCYDAY_PUBLIC_ORIGIN='https://app.example:8443'
+& $compose --env-file NUL -f docker-compose.yml config --format json
+$env:EFFICIENCYDAY_SESSION_TTL_DAYS=''
+& $compose --env-file NUL -f docker-compose.yml config --format json
+```
+
+Exact assertion output (exit code **0**):
+
+```text
+Compose config --quiet: passed
+Env example TTL=7 and public origin=https://example.com: passed
+Unset TTL defaults to 7; absent public origin stays empty: passed
+Override TTL=3 and public origin=https://app.example:8443: passed
+Empty TTL defaults to 7: passed
+```
+
+### Review, scope preservation, and concerns
+
+The complete scoped diff was reviewed directly. Only the three production fixes, their focused tests, the two env examples, Compose, and this report are included in the fix commit. Unrelated development-progress documentation and planning files remain untouched. The required Copilot co-author trailer is included.
+
+No outstanding implementation concern was identified. Container runtime behavior was not exercised because Docker is unavailable; Compose schema validation and actual interpolation were verified using the official standalone CLI. The temporary CLI and checksum download are not repository changes.
