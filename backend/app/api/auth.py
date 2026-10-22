@@ -6,6 +6,7 @@ from app.api.dependencies import (
     get_current_session,
     get_current_user,
     require_csrf,
+    require_public_origin,
 )
 from app.core.time import utc_now
 from app.db.models import SessionRecord, User
@@ -16,7 +17,11 @@ from app.services.auth import authenticate_user, revoke_session
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 
-@router.post("/login", response_model=AuthStatusResponse)
+@router.post(
+    "/login",
+    response_model=AuthStatusResponse,
+    dependencies=[Depends(require_public_origin)],
+)
 def login(
     payload: LoginRequest,
     request: Request,

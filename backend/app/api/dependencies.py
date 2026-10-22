@@ -1,7 +1,9 @@
 import hmac
+import ipaddress
 from urllib.parse import urlsplit
 
 from fastapi import Depends, HTTPException, Request
+from pydantic import AnyHttpUrl
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -54,26 +56,42 @@ def _origin_tuple(value: str, *, allow_root_path: bool = False) -> tuple[str, st
         ):
             return None
         scheme = parsed.scheme.lower()
+        hostname = parsed.hostname
+        try:
+            normalized_host = ipaddress.ip_address(hostname).compressed.lower()
+        except ValueError:
+            normalized_host = hostname.encode("idna").decode("ascii").lower()
         port = parsed.port
-    except ValueError:
+    except (UnicodeError, ValueError):
         return None
 
     if port is None:
         port = 443 if scheme == "https" else 80
-    return scheme, parsed.hostname.lower(), port
+    return scheme, normalized_host, port
+
+
+def require_public_origin(request: Request) -> tuple[str, str, int]:
+    configured_origin: AnyHttpUrl | None = request.app.state.settings.public_origin
+    expected_origin = (
+        _origin_tuple(str(configured_origin), allow_root_path=True)
+        if configured_origin is not None
+        else None
+    )
+    if expected_origin is None:
+        raise HTTPException(status_code=503, detail="Public origin is not configured.")
+    if _origin_tuple(request.headers.get("origin", "")) != expected_origin:
+        raise HTTPException(status_code=403, detail="CSRF validation failed.")
+    return expected_origin
 
 
 def require_csrf(
     request: Request,
+    expected_origin: tuple[str, str, int] = Depends(require_public_origin),
     current_session: SessionRecord = Depends(get_current_session),
 ) -> None:
-    expected_origin = _origin_tuple(str(request.base_url), allow_root_path=True)
-    actual_origin = _origin_tuple(request.headers.get("origin", ""))
     supplied_token = request.headers.get("x-csrf-token", "")
     if (
-        expected_origin is None
-        or actual_origin != expected_origin
-        or not supplied_token
+        not supplied_token
         or not hmac.compare_digest(
             current_session.csrf_token.encode("utf-8"), supplied_token.encode("utf-8")
         )

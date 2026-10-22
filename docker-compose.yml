@@ -5,6 +5,7 @@ services:
     restart: unless-stopped
     environment:
       EFFICIENCYDAY_DATABASE_PATH: /app/data/efficiencyday.db
+      EFFICIENCYDAY_PUBLIC_ORIGIN: ${EFFICIENCYDAY_PUBLIC_ORIGIN:-}
     volumes:
       - backend-data:/app/data
     healthcheck:

@@ -1,6 +1,7 @@
 from pathlib import Path
+from urllib.parse import urlsplit
 
-from pydantic import PositiveInt, SecretStr, field_validator
+from pydantic import AnyHttpUrl, PositiveInt, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 BACKEND_ROOT = Path(__file__).resolve().parents[2]
@@ -18,6 +19,28 @@ class Settings(BaseSettings):
     initial_username: str | None = None
     initial_password: SecretStr | None = None
     session_ttl_days: PositiveInt = 7
+    public_origin: AnyHttpUrl | None = None
+
+    @field_validator("public_origin", mode="before")
+    @classmethod
+    def blank_public_origin_is_absent(cls, value: object) -> object:
+        if isinstance(value, str):
+            value = value.strip()
+            if not value:
+                return None
+            parsed = urlsplit(value)
+            if parsed.path or "?" in value or "#" in value:
+                raise ValueError("public_origin must not include a path, query, or fragment")
+        return value
+
+    @field_validator("public_origin")
+    @classmethod
+    def public_origin_must_be_an_origin(cls, value: AnyHttpUrl | None) -> AnyHttpUrl | None:
+        if value is not None and (
+            value.path not in ("", "/") or value.query is not None or value.fragment is not None
+        ):
+            raise ValueError("public_origin must not include a path, query, or fragment")
+        return value
 
     @field_validator("database_path")
     @classmethod

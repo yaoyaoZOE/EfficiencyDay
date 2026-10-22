@@ -13,16 +13,30 @@ from app.db.models import SessionRecord
 from app.main import create_app
 
 
-def _client(database_path: Path) -> TestClient:
+def _client(
+    database_path: Path,
+    *,
+    public_origin: str | None = "https://testserver",
+    base_url: str = "https://testserver",
+) -> TestClient:
     migrate_database(database_path)
     settings = Settings(
         database_path=database_path,
         initial_username="admin",
         initial_password="correct horse battery staple",
         session_ttl_days=1,
+        public_origin=public_origin,
         _env_file=None,
     )
-    return TestClient(create_app(settings), base_url="https://testserver")
+    return TestClient(create_app(settings), base_url=base_url)
+
+
+def _login(client: TestClient):
+    return client.post(
+        "/api/v1/auth/login",
+        json={"username": "admin", "password": "correct horse battery staple"},
+        headers={"Origin": "https://testserver"},
+    )
 
 
 def test_password_hashing_verifies_only_the_original_password() -> None:
@@ -46,6 +60,7 @@ def test_login_sets_secure_cookie_and_persists_only_session_token_hash(
         response = client.post(
             "/api/v1/auth/login",
             json={"username": "admin", "password": "correct horse battery staple"},
+            headers={"Origin": "https://testserver"},
         )
         cookie = response.headers["set-cookie"]
         raw_token = client.cookies.get("efficiencyday_session")
@@ -69,10 +84,14 @@ def test_login_sets_secure_cookie_and_persists_only_session_token_hash(
 def test_invalid_username_and_password_have_same_generic_error(tmp_path: Path) -> None:
     with _client(tmp_path / "auth.db") as client:
         unknown_user = client.post(
-            "/api/v1/auth/login", json={"username": "missing", "password": "wrong"}
+            "/api/v1/auth/login",
+            json={"username": "missing", "password": "wrong"},
+            headers={"Origin": "https://testserver"},
         )
         wrong_password = client.post(
-            "/api/v1/auth/login", json={"username": "admin", "password": "wrong"}
+            "/api/v1/auth/login",
+            json={"username": "admin", "password": "wrong"},
+            headers={"Origin": "https://testserver"},
         )
 
     assert unknown_user.status_code == wrong_password.status_code == 401
@@ -81,10 +100,7 @@ def test_invalid_username_and_password_have_same_generic_error(tmp_path: Path) -
 
 def test_me_returns_authenticated_user_timezone_and_csrf_token(tmp_path: Path) -> None:
     with _client(tmp_path / "auth.db") as client:
-        login = client.post(
-            "/api/v1/auth/login",
-            json={"username": "admin", "password": "correct horse battery staple"},
-        )
+        login = _login(client)
         assert login.status_code == 200
 
         response = client.get("/api/v1/auth/me")
@@ -98,10 +114,7 @@ def test_me_returns_authenticated_user_timezone_and_csrf_token(tmp_path: Path) -
 
 def test_logout_requires_csrf_and_same_origin(tmp_path: Path) -> None:
     with _client(tmp_path / "auth.db") as client:
-        client.post(
-            "/api/v1/auth/login",
-            json={"username": "admin", "password": "correct horse battery staple"},
-        )
+        _login(client)
         with client.app.state.session_factory() as session:
             csrf_token = session.scalar(select(SessionRecord)).csrf_token
 
@@ -126,10 +139,7 @@ def test_logout_revokes_session_clears_cookie_and_prevents_reuse(tmp_path: Path)
     from app.core.security import hash_token
 
     with _client(tmp_path / "auth.db") as client:
-        client.post(
-            "/api/v1/auth/login",
-            json={"username": "admin", "password": "correct horse battery staple"},
-        )
+        _login(client)
         raw_token = client.cookies.get("efficiencyday_session")
         with client.app.state.session_factory() as session:
             record = session.scalar(
@@ -161,10 +171,7 @@ def test_expired_and_revoked_sessions_cannot_authenticate(tmp_path: Path) -> Non
     from app.core.security import hash_token
 
     with _client(tmp_path / "auth.db") as client:
-        client.post(
-            "/api/v1/auth/login",
-            json={"username": "admin", "password": "correct horse battery staple"},
-        )
+        _login(client)
         expired_token = client.cookies.get("efficiencyday_session")
         with client.app.state.session_factory.begin() as session:
             record = session.scalar(
@@ -178,10 +185,7 @@ def test_expired_and_revoked_sessions_cannot_authenticate(tmp_path: Path) -> Non
         expired = client.get("/api/v1/auth/me")
         assert expired.status_code == 401
 
-        client.post(
-            "/api/v1/auth/login",
-            json={"username": "admin", "password": "correct horse battery staple"},
-        )
+        _login(client)
         revoked_token = client.cookies.get("efficiencyday_session")
         with client.app.state.session_factory.begin() as session:
             record = session.scalar(
@@ -195,3 +199,46 @@ def test_expired_and_revoked_sessions_cannot_authenticate(tmp_path: Path) -> Non
         revoked = client.get("/api/v1/auth/me")
 
     assert revoked.status_code == 401
+
+
+def test_unsafe_request_fails_closed_when_public_origin_is_unset(tmp_path: Path) -> None:
+    with _client(tmp_path / "auth.db", public_origin=None) as client:
+        response = client.post(
+            "/api/v1/auth/login",
+            json={"username": "admin", "password": "correct horse battery staple"},
+            headers={"Origin": "https://testserver"},
+        )
+        logout_response = client.post(
+            "/api/v1/auth/logout",
+            headers={"Origin": "https://testserver"},
+        )
+
+    assert response.status_code == logout_response.status_code == 503
+    assert response.json() == {"detail": "Public origin is not configured."}
+    assert logout_response.json() == {"detail": "Public origin is not configured."}
+
+
+def test_unsafe_request_rejects_origin_mismatch(tmp_path: Path) -> None:
+    with _client(tmp_path / "auth.db") as client:
+        response = client.post(
+            "/api/v1/auth/login",
+            json={"username": "admin", "password": "correct horse battery staple"},
+            headers={"Origin": "https://attacker.example"},
+        )
+
+    assert response.status_code == 403
+
+
+def test_external_origin_is_accepted_without_forwarded_headers(tmp_path: Path) -> None:
+    with _client(
+        tmp_path / "auth.db",
+        public_origin="https://app.example:443",
+        base_url="http://backend.internal:6931",
+    ) as client:
+        response = client.post(
+            "/api/v1/auth/login",
+            json={"username": "admin", "password": "correct horse battery staple"},
+            headers={"Origin": "https://APP.example"},
+        )
+
+    assert response.status_code == 200
