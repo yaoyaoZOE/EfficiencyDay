@@ -1,6 +1,6 @@
 # EfficiencyDay
 
-个人日常工作项管理工具。当前仓库提供可运行的开发骨架和 Docker Compose 部署配置，尚未实现登录或任务管理。
+个人日常工作项管理工具。当前已接通个人账号登录/退出、工作项创建、分页列表及详情读取；编辑、状态流转和四象限视图尚未开放。仓库同时提供本地开发和 Docker Compose 部署配置，配置存在不代表已完成服务器部署验收。
 
 ## 技术栈
 
@@ -49,6 +49,10 @@ Set-Location ..
 
 可复制 `backend\.env.example` 为 `backend\.env`，修改 `EFFICIENCYDAY_DATABASE_PATH`。相对路径始终以 `backend` 为基准，应用和迁移使用相同配置。不要将数据文件放入前端静态目录。
 
+首次使用空的、已迁移数据库时，在不提交的 `backend\.env` 中配置 `EFFICIENCYDAY_INITIAL_USERNAME` 和 `EFFICIENCYDAY_INITIAL_PASSWORD`，启动后端时创建个人账号；两项必须同时配置。已有账号不会被启动配置覆盖，创建后可移除这两项。不要将密码或 `.env` 提交到 Git。
+
+本地登录还需设置 `EFFICIENCYDAY_PUBLIC_ORIGIN=http://127.0.0.1:8327`，与浏览器地址栏的协议、主机、端口完全一致；使用 `localhost` 时相应改为 `http://localhost:8327`。不要保留示例中的 `https://example.com`，否则登录和写请求会被拒绝。会话默认有效 7 天，可通过 `EFFICIENCYDAY_SESSION_TTL_DAYS` 设置正整数天数。
+
 ### 3. 启动
 
 双击仓库根目录的 `start-dev.bat`，脚本会检查本地 Python、Node.js/npm、`backend\.env` 和端口占用，先执行数据库迁移，再分别打开前后端终端窗口。出错时会提示原因并停止；不会自动换端口，也不会关闭占用端口的进程。关闭前后端终端窗口即可停止服务。
@@ -73,14 +77,23 @@ npm run dev
 
 | 地址 | 用途 |
 | --- | --- |
-| http://127.0.0.1:8327 | 前端状态页 |
+| http://127.0.0.1:8327 | 个人工作台与登录入口 |
 | http://127.0.0.1:6931/docs | FastAPI 交互式接口文档 |
 | http://127.0.0.1:6931/api/v1/health/live | 进程存活检查，不依赖数据库就绪 |
 | http://127.0.0.1:6931/api/v1/health/ready | 数据库连接和 Alembic 版本检查 |
 
-前端使用相对路径 `/api/v1`，由 Vite 代理到 `127.0.0.1:6931`，不需要开放跨域。页面展示真实的数据库就绪结果，并允许失败后重试。请求超时会显示错误，不伪装为健康。
+前端使用相对路径 `/api/v1`，由 Vite 代理到 `127.0.0.1:6931`，不需要开放跨域。页面底部的“开发环境状态”可展开查看真实的数据库就绪结果，并允许失败后重试。请求超时会显示错误，不伪装为健康。
 
 当前只监听本机地址，不对局域网或公网开放；这不是生产配置。
+
+### 4. 使用与当前边界
+
+- 打开页面时检查登录态，登录后自动读取工作项。登录 Cookie 为 `HttpOnly`、`Secure`、`SameSite=Lax`；浏览器需支持本机回环地址的安全上下文例外，非本机 HTTP 地址应使用 HTTPS，不能通过关闭 Cookie 安全属性绕过。
+- 创建时填写标题，可选紧急/重要程度、颜色、目标完成日期、背景和目标。任一优先级未设置即为待分类；颜色只是标记。日历日期不做时区转换，系统时间按账号时区显示。
+- 列表按录入时间和 ID 倒序，每页最多 50 条；后端尚未提供总数，满页后可能有空的下一页。点击标题单独读取详情；刷新页面或重新获得焦点会重新取数。
+- 创建成功后清空表单、刷新列表并读取详情。失败时保留输入；超时或网络中断显示“保存未确认”，应先刷新列表核对，避免重复创建。写请求不会自动重试。
+- 会话失效后隐藏工作项并清理查询/写操作缓存。同一账号在当前页面重新登录后可继续草稿；切换账号或确认退出会清空草稿。草稿仅在页面内存中，刷新或关闭页面会丢失；密码和令牌不写入本地存储。
+- 本轮不包含编辑、状态流转、执行清单、过程记录、模板和四象限；服务器 HTTPS 与容器重建持久化仍需单独验收。
 
 ## 验证命令
 
@@ -108,7 +121,9 @@ VS Code 也提供 `test: backend`、`test: frontend` 和 `build: frontend` 任�
 
 ```powershell
 docker compose config --quiet
-docker compose up -d --build --wait --wait-timeout 120
+docker compose build
+docker compose run --rm --no-deps backend python -m alembic upgrade head
+docker compose up -d --wait --wait-timeout 120
 docker compose ps
 curl.exe --fail http://127.0.0.1:8327/
 curl.exe --fail http://127.0.0.1:8327/api/v1/health/ready
@@ -117,7 +132,7 @@ curl.exe --fail http://127.0.0.1:8327/api/v1/health/ready
 访问 http://127.0.0.1:8327 查看页面。默认端口与本地开发前端相同，启动前请先停止占用该端口的开发服务，或修改端口。
 
 - 前端使用 Node.js 22 多阶段构建，最终镜像仅保留 Nginx 和静态产物，不运行 Vite 开发服务器。Nginx 提供 SPA 路由回退，并将 `/api/` 请求原样代理到后端；API 错误不会回退成 HTML。
-- 后端使用 Python 3.14，以非 root 用户运行，按现有锁文件约束安装运行依赖，不安装测试和 lint 工具。每次启动先执行 `alembic upgrade head`，成功后才启动单进程 Uvicorn；迁移失败将输出日志并退出，不会跳过迁移继续提供服务。
+- 后端使用 Python 3.14，以非 root 用户运行，按现有锁文件约束安装运行依赖，不安装测试和 lint 工具。迁移必须通过上面的独立命令执行，确认成功后才启动服务；容器启动仅运行单进程 Uvicorn，不会自动迁移，缺少迁移时就绪检查返回 503。
 - 后端就绪检查通过后，Compose 才启动前端。后端仅通过容器网络访问，不发布 6931 端口。两端都有健康检查和 `unless-stopped` 重启策略；健康检查失败本身不会触发 Docker 自动重启。
 - SQLite 文件及 WAL 文件保存在 `backend-data` 命名卷的 `/app/data` 中，不会写入镜像，也不会自动导入本地开发数据库。构建上下文使用白名单，不包含本地 `.env`、数据库、虚拟环境或 `node_modules`。
 
@@ -130,7 +145,7 @@ EFFICIENCYDAY_BIND_ADDRESS=127.0.0.1
 EFFICIENCYDAY_PORT=8327
 ```
 
-修改后重新执行 `docker compose up -d --wait`。需要通过局域网访问时，可显式将监听地址设置为 `0.0.0.0`，并配置宿主机防火墙。**当前应用没有身份认证，部署配置不提供 HTTPS，不应直接暴露到公网。** 公网部署还需要外层 TLS 反向代理、访问控制及相应安全配置。
+修改后重新执行 `docker compose up -d --wait`。需要通过局域网访问时，可显式将监听地址设置为 `0.0.0.0`，并配置宿主机防火墙。**当前应用已有身份认证，但部署配置不提供 HTTPS，不应直接暴露到公网。** 公网及非本机浏览器登录还需要外层 TLS 反向代理、访问控制及相应安全配置。将 `EFFICIENCYDAY_PUBLIC_ORIGIN` 设置为准确的浏览器访问源；首次创建账号时，在根目录不提交的 `.env` 配置初始化用户名和密码，迁移成功并启动后再移除初始化凭据。
 
 容器固定使用 `/app/data/efficiencyday.db`，不会读取宿主机 `backend\.env`。不要扩容后端副本；当前 SQLite 和启动迁移方案面向单实例部署。
 
@@ -140,6 +155,7 @@ EFFICIENCYDAY_PORT=8327
 docker compose logs --tail 100 backend frontend
 # 升级前先按下文备份数据库，再更新源码并重建。
 docker compose build --pull
+docker compose run --rm --no-deps backend python -m alembic upgrade head
 docker compose up -d --wait --wait-timeout 120
 # 停止并移除容器、网络，但保留数据库卷。
 docker compose down
@@ -171,11 +187,12 @@ docker compose -p efficiencyday-restore create backend
 docker compose -p efficiencyday-restore cp "${backup}\." backend:/app/data
 # cp 可能改变文件所有者；启动非 root 后端前修正卷权限。
 docker compose -p efficiencyday-restore run --rm --no-deps --user root backend chown -R 10001:10001 /app/data
+docker compose -p efficiencyday-restore run --rm --no-deps backend python -m alembic upgrade head
 docker compose -p efficiencyday-restore up -d --wait --wait-timeout 120
 curl.exe --fail http://127.0.0.1:8327/api/v1/health/ready
 ```
 
-仅在每一步成功后继续。恢复环境启动时会迁移到当前源码的数据库版本，因此应使用兼容版本，恢复前保留原始备份。升级后降级镜像不保证兼容已经迁移的数据库；回退应使用升级前的数据备份和相应旧版源码。
+仅在每一步成功后继续。恢复环境通过独立迁移命令升级到当前源码的数据库版本，因此应使用兼容版本，恢复前保留原始备份。升级后降级镜像不保证兼容已经迁移的数据库；回退应使用升级前的数据备份和相应旧版源码。
 
 可在测试部署中执行一次 `docker compose down` 后重新 `up`，再访问就绪接口，确认保留卷后仍可启动。更严格的持久化验收应先在测试数据库写入已知数据，重建容器后核对该数据，而不只是检查健康状态。
 
@@ -212,9 +229,10 @@ frontend/
   src/
     api/          HTTP 请求及响应校验
     test/         测试初始化
-    App.tsx       项目状态页
+    components/   登录、工作项表单、列表、详情及环境检查
+    App.tsx       登录态恢复与受保护工作台入口
 .vscode/          本地启动、测试和构建任务
 docs/archi/       架构及需求文档
 ```
 
-骨架仅创建 `app_metadata` 表用于建立迁移基线，未预先固化业务模型。后续再逐步接入身份认证与工作项功能。
+数据库迁移包含 `app_metadata` 基线及 `users`、`sessions`、`work_items` 三张业务表。当前已具备受保护的登录和工作项创建/读取链路；后续按开发进度逐步完成编辑、状态流转与其他功能。

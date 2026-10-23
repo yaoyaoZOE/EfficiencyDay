@@ -11,11 +11,11 @@
 * { box-sizing: border-box; }
 body { margin: 0; min-width: 320px; }
 button, a { -webkit-tap-highlight-color: transparent; }
-button { font: inherit; }
+button, input, select, textarea { font: inherit; }
 a { color: #2563eb; text-underline-offset: 4px; }
-button:focus-visible, a:focus-visible { outline: 3px solid #60a5fa; outline-offset: 4px; }
+button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 3px solid #60a5fa; outline-offset: 4px; }
 
-.shell { max-width: 900px; margin: 0 auto; padding: 48px 24px; }
+.shell { max-width: 1200px; margin: 0 auto; padding: 40px 24px; }
 .brand { display: flex; align-items: center; gap: 12px; font-size: 20px; font-weight: 700; }
 .brand-mark { display: grid; place-items: center; width: 38px; height: 38px; background: #2563eb; color: white; border-radius: 10px; }
 .badge { font-size: 12px; color: #475569; background: #e2e8f0; padding: 3px 10px; border-radius: 16px; font-weight: 500; }
@@ -38,6 +38,44 @@ button:disabled { opacity: .55; cursor: wait; }
 dt { color: #64748b; }
 dd { margin: 0; text-align: right; }
 footer { margin-top: 24px; color: #64748b; font-size: 13px; }
+.muted { color: #64748b; font-size: 14px; }
+.login-card { max-width: 480px; }
+fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
+label { display: block; margin: 16px 0 6px; font-size: 14px; font-weight: 600; }
+input, select, textarea { width: 100%; min-width: 0; border: 1px solid #cbd5e1; border-radius: 7px; padding: 9px 12px; color: #1e293b; background: white; }
+textarea { resize: vertical; }
+input:disabled, select:disabled, textarea:disabled { background: #f1f5f9; }
+button.primary { margin-top: 20px; background: #2563eb; border-color: #2563eb; color: white; padding: 9px 18px; }
+button.primary:hover:not(:disabled) { background: #1d4ed8; color: white; }
+.field-error { color: #991b1b; font-size: 14px; }
+.workspace-heading { display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 30px 0 18px; }
+.workspace-heading h1 { margin: 0; }
+.workspace-heading p { margin: 6px 0 0; }
+.account { display: flex; align-items: center; gap: 14px; overflow-wrap: anywhere; }
+.workspace-grid { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); align-items: start; gap: 24px; }
+.stack { display: grid; min-width: 0; gap: 24px; }
+.workspace-grid > .card { min-width: 0; }
+.form-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 0 16px; }
+.work-items { list-style: none; padding: 0; margin: 12px 0 20px; }
+.work-items li { padding: 16px 12px; border-bottom: 1px solid #e2e8f0; border-radius: 7px; }
+.work-items li.selected { background: #eff6ff; }
+button.item-title { border: 0; background: transparent; padding: 0; text-align: left; white-space: normal; overflow-wrap: anywhere; color: #1d4ed8; font-weight: 600; }
+.item-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; margin-top: 8px; color: #64748b; font-size: 12px; }
+.pagination { display: flex; align-items: center; justify-content: space-between; gap: 12px; font-size: 14px; }
+.empty { padding: 28px 0; color: #64748b; text-align: center; }
+.detail-title { overflow-wrap: anywhere; font-size: 20px; }
+.detail-facts > div { display: flex; justify-content: space-between; gap: 16px; padding: 8px 0; border-bottom: 1px solid #f1f5f9; }
+.detail-facts { font-size: 14px; }
+.detail-facts dd { overflow-wrap: anywhere; }
+.detail-section h3 { font-size: 15px; margin: 20px 0 6px; }
+.detail-section p { white-space: pre-wrap; overflow-wrap: anywhere; margin: 0; }
+.environment { margin-top: 24px; box-shadow: none; }
+.environment summary { cursor: pointer; color: #64748b; font-size: 14px; }
+.environment[open] summary { margin-bottom: 20px; }
+
+@media (max-width: 850px) {
+  .workspace-grid { grid-template-columns: minmax(0, 1fr); }
+}
 
 @media (max-width: 520px) {
   .shell { padding: 24px 16px; }
@@ -45,4 +83,8 @@ footer { margin-top: 24px; color: #64748b; font-size: 13px; }
   .card { padding: 20px; }
   .endpoints > div { flex-direction: column; gap: 4px; }
   dd { text-align: left; overflow-wrap: anywhere; }
+  .workspace-heading { align-items: flex-start; flex-direction: column; }
+  .account { width: 100%; justify-content: space-between; }
+  .form-grid { grid-template-columns: minmax(0, 1fr); }
+  .detail-facts > div { flex-direction: column; gap: 4px; }
 }
