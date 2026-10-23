@@ -22,6 +22,7 @@ def _client(
     *,
     public_origin: str | None = "https://testserver",
     base_url: str = "https://testserver",
+    session_cookie_secure: bool = True,
 ) -> TestClient:
     migrate_database(database_path)
     settings = Settings(
@@ -30,6 +31,7 @@ def _client(
         initial_password="correct horse battery staple",
         session_ttl_days=1,
         public_origin=public_origin,
+        session_cookie_secure=session_cookie_secure,
         _env_file=None,
     )
     return TestClient(create_app(settings), base_url=base_url)
@@ -103,6 +105,107 @@ def test_invalid_username_and_password_have_same_generic_error(tmp_path: Path) -
     assert unknown_user.json() == wrong_password.json()
 
 
+@pytest.mark.parametrize("secure", [True, False])
+def test_http_session_requires_explicit_cookie_security_opt_out(
+    tmp_path: Path, secure: bool
+) -> None:
+    origin = "http://192.0.2.1:8327"
+    with _client(
+        tmp_path / "auth.db",
+        public_origin=origin,
+        base_url=origin,
+        session_cookie_secure=secure,
+    ) as client:
+        login = client.post(
+            "/api/v1/auth/login",
+            json={"username": "admin", "password": "correct horse battery staple"},
+            headers={"Origin": origin},
+        )
+        assert login.status_code == 200
+        cookie = login.headers["set-cookie"].lower()
+        assert ("secure" in cookie) is secure
+        assert "httponly" in cookie
+        assert "samesite=lax" in cookie
+        assert "path=/" in cookie
+        me = client.get("/api/v1/auth/me")
+        assert me.status_code == (401 if secure else 200)
+        if secure:
+            return
+
+        csrf_token = me.json()["csrf_token"]
+        assert client.get("/api/v1/auth/me").status_code == 200
+        assert client.post("/api/v1/auth/logout", headers={"Origin": origin}).status_code == 403
+        assert (
+            client.post(
+                "/api/v1/auth/logout",
+                headers={"Origin": origin, "X-CSRF-Token": "wrong"},
+            ).status_code
+            == 403
+        )
+        assert (
+            client.post(
+                "/api/v1/auth/logout",
+                headers={"Origin": "http://attacker.example", "X-CSRF-Token": csrf_token},
+            ).status_code
+            == 403
+        )
+
+        raw_token = client.cookies.get("efficiencyday_session")
+        logout = client.post(
+            "/api/v1/auth/logout",
+            headers={"Origin": origin, "X-CSRF-Token": csrf_token},
+        )
+        assert logout.status_code == 200
+        deleted_cookie = logout.headers["set-cookie"].lower()
+        assert "secure" not in deleted_cookie
+        assert "httponly" in deleted_cookie
+        assert "samesite=lax" in deleted_cookie
+        assert "max-age=0" in deleted_cookie
+        assert client.cookies.get("efficiencyday_session") is None
+        assert client.get("/api/v1/auth/me").status_code == 401
+        assert (
+            client.get(
+                "/api/v1/auth/me",
+                headers={"Cookie": f"efficiencyday_session={raw_token}"},
+            ).status_code
+            == 401
+        )
+
+
+@pytest.mark.parametrize("secure", [True, False])
+def test_insecure_cookie_mode_logs_startup_warning(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], secure: bool
+) -> None:
+    with _client(tmp_path / "auth.db", session_cookie_secure=secure):
+        pass
+
+    warning = "EFFICIENCYDAY_SESSION_COOKIE_SECURE=false"
+    assert (warning in capsys.readouterr().err) is (not secure)
+
+
+@pytest.mark.parametrize(
+    "origin, expected_status",
+    [(None, 503), ("http://attacker.example", 403), ("http://192.0.2.1", 403)],
+)
+def test_http_cookie_mode_still_requires_exact_public_origin(
+    tmp_path: Path, origin: str | None, expected_status: int
+) -> None:
+    with _client(
+        tmp_path / "auth.db",
+        public_origin=None if origin is None else "http://192.0.2.1:8327",
+        base_url="http://192.0.2.1:8327",
+        session_cookie_secure=False,
+    ) as client:
+        response = client.post(
+            "/api/v1/auth/login",
+            json={"username": "admin", "password": "correct horse battery staple"},
+            headers={} if origin is None else {"Origin": origin},
+        )
+
+    assert response.status_code == expected_status
+    assert "set-cookie" not in response.headers
+
+
 @pytest.mark.parametrize(
     ("username", "password"),
     [
@@ -162,9 +265,7 @@ def test_logout_requires_csrf_and_same_origin(tmp_path: Path) -> None:
         with client.app.state.session_factory() as session:
             csrf_token = session.scalar(select(SessionRecord)).csrf_token
 
-        missing_csrf = client.post(
-            "/api/v1/auth/logout", headers={"Origin": "https://testserver"}
-        )
+        missing_csrf = client.post("/api/v1/auth/logout", headers={"Origin": "https://testserver"})
         mismatched_csrf = client.post(
             "/api/v1/auth/logout",
             headers={"Origin": "https://testserver", "X-CSRF-Token": "wrong"},
@@ -219,9 +320,7 @@ def test_expired_and_revoked_sessions_cannot_authenticate(tmp_path: Path) -> Non
         expired_token = client.cookies.get("efficiencyday_session")
         with client.app.state.session_factory.begin() as session:
             record = session.scalar(
-                select(SessionRecord).where(
-                    SessionRecord.token_hash == hash_token(expired_token)
-                )
+                select(SessionRecord).where(SessionRecord.token_hash == hash_token(expired_token))
             )
             assert record is not None
             record.expires_at = utc_now() - timedelta(seconds=1)
@@ -233,9 +332,7 @@ def test_expired_and_revoked_sessions_cannot_authenticate(tmp_path: Path) -> Non
         revoked_token = client.cookies.get("efficiencyday_session")
         with client.app.state.session_factory.begin() as session:
             record = session.scalar(
-                select(SessionRecord).where(
-                    SessionRecord.token_hash == hash_token(revoked_token)
-                )
+                select(SessionRecord).where(SessionRecord.token_hash == hash_token(revoked_token))
             )
             assert record is not None
             record.revoked_at = utc_now()

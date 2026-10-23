@@ -88,7 +88,7 @@ npm run dev
 
 ### 4. 使用与当前边界
 
-- 打开页面时检查登录态，登录后自动读取工作项。登录 Cookie 为 `HttpOnly`、`Secure`、`SameSite=Lax`；浏览器需支持本机回环地址的安全上下文例外，非本机 HTTP 地址应使用 HTTPS，不能通过关闭 Cookie 安全属性绕过。
+- 打开页面时检查登录态，登录后自动读取工作项。登录 Cookie 默认带有 `HttpOnly`、`Secure`、`SameSite=Lax`；浏览器需支持本机回环地址的安全上下文例外，公网访问应使用 HTTPS。仅在明确接受明文传输风险时，可按下文显式启用 HTTP 不安全兼容模式；不会自动根据访问协议降低 Cookie 安全性。
 - 创建时填写标题，可选紧急/重要程度、颜色、目标完成日期、背景和目标。任一优先级未设置即为待分类；颜色只是标记。日历日期不做时区转换，系统时间按账号时区显示。
 - 列表按录入时间和 ID 倒序，每页最多 50 条；后端尚未提供总数，满页后可能有空的下一页。点击标题单独读取详情；刷新页面或重新获得焦点会重新取数。
 - 创建成功后清空表单、刷新列表并读取详情。失败时保留输入；超时或网络中断显示“保存未确认”，应先刷新列表核对，避免重复创建。写请求不会自动重试。
@@ -145,9 +145,39 @@ EFFICIENCYDAY_BIND_ADDRESS=127.0.0.1
 EFFICIENCYDAY_PORT=8327
 ```
 
-修改后重新执行 `docker compose up -d --wait`。需要通过局域网访问时，可显式将监听地址设置为 `0.0.0.0`，并配置宿主机防火墙。**当前应用已有身份认证，但部署配置不提供 HTTPS，不应直接暴露到公网。** 公网及非本机浏览器登录还需要外层 TLS 反向代理、访问控制及相应安全配置。将 `EFFICIENCYDAY_PUBLIC_ORIGIN` 设置为准确的浏览器访问源；首次创建账号时，在根目录不提交的 `.env` 配置初始化用户名和密码，迁移成功并启动后再移除初始化凭据。
+修改后重新执行 `docker compose up -d --wait`。需要通过局域网访问时，可显式将监听地址设置为 `0.0.0.0`，并配置宿主机防火墙。**当前应用已有身份认证，但部署配置不提供 HTTPS，不应直接暴露到公网。** 正常公网部署应使用外层 TLS 反向代理、访问控制及相应安全配置。将 `EFFICIENCYDAY_PUBLIC_ORIGIN` 设置为准确的浏览器访问源；首次创建账号时，在根目录不提交的 `.env` 配置初始化用户名和密码，迁移成功并启动后再移除初始化凭据。
 
 容器固定使用 `/app/data/efficiencyday.db`，不会读取宿主机 `backend\.env`。不要扩容后端副本；当前 SQLite 和启动迁移方案面向单实例部署。
+
+### 无域名访问与 HTTP 不安全兼容模式
+
+使用 IP 不要求关闭安全 Cookie：可使用包含 IP 的受信任 HTTPS 证书，或通过 SSH 本地隧道访问本机回环地址。仅设置 HTTP 的 `EFFICIENCYDAY_PUBLIC_ORIGIN` 不会关闭 `Secure`，因此默认情况下公网 HTTP 登录成功后仍无法恢复会话。
+
+确需 HTTP 兼容时，必须显式设置 `EFFICIENCYDAY_SESSION_COOKIE_SECURE=false`。**HTTP 会明文传输密码、会话令牌和业务数据，可能被窃听、篡改或劫持会话；此模式不适合长期公网部署。** `HttpOnly`、`SameSite=Lax`、来源校验和 CSRF 校验仍保留，但它们不能代替传输加密。后端启动时会记录不安全模式警告，不会将 HTTP 自动降级为受支持的安全配置。
+
+若由宿主机 Nginx 提供公网入口，在根目录不提交的 `.env` 中配置（将示例 IP 替换为实际服务器 IP）：
+
+```dotenv
+EFFICIENCYDAY_PUBLIC_ORIGIN=http://203.0.113.10
+EFFICIENCYDAY_SESSION_COOKIE_SECURE=false
+EFFICIENCYDAY_BIND_ADDRESS=127.0.0.1
+EFFICIENCYDAY_PORT=8327
+```
+
+宿主机 Nginx 应将页面和完整的 `/api/` 路径都转发到 `http://127.0.0.1:8327`，`proxy_pass` 地址末尾不要加 `/`；不要转发到宿主机 `6931`，该端口仅在容器网络内可见。无需向公网开放 `8327` 或 `6931`。如果确实直接访问容器映射端口，公开源必须包括浏览器中的端口（例如 `http://203.0.113.10:8327`），并需另行配置绑定地址、宿主机防火墙及云安全组。
+
+部署更新后的源码并重建前后端镜像，再重建容器：
+
+```powershell
+docker compose build backend frontend
+docker compose up -d --force-recreate --wait --wait-timeout 120 backend frontend
+docker compose exec backend printenv EFFICIENCYDAY_PUBLIC_ORIGIN EFFICIENCYDAY_SESSION_COOKIE_SECURE
+docker compose logs --tail 50 backend
+```
+
+环境变量更改后仅执行 `restart` 不会生效；不要通过删除数据库卷解决配置问题。用浏览器验证登录接口与随后的 `/api/v1/auth/me` 均为 200，刷新后仍可读取当前用户，退出后 `/api/v1/auth/me` 返回 401。
+
+恢复 HTTPS 时，将 `EFFICIENCYDAY_SESSION_COOKIE_SECURE` 设回 `true`，并同步修改 `EFFICIENCYDAY_PUBLIC_ORIGIN` 为准确的 HTTPS 访问源，然后重建容器。切换后使用新的 HTTPS 地址，清理旧入口 Cookie 并重新登录。此开关默认值为 `true`，非法布尔配置会导致后端启动失败；不配置公开源仍返回 503，来源不匹配仍返回 403。本地非容器运行时，将同一配置写入 `backend\.env`。
 
 ### 日志、升级与停止
 

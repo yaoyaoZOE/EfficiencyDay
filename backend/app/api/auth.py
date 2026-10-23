@@ -43,7 +43,7 @@ def login(
         key=SESSION_COOKIE_NAME,
         value=token,
         httponly=True,
-        secure=True,
+        secure=request.app.state.settings.session_cookie_secure,
         samesite="lax",
         path="/",
     )
@@ -65,6 +65,7 @@ def get_me(
 
 @router.post("/logout", response_model=AuthStatusResponse, dependencies=[Depends(require_csrf)])
 def logout(
+    request: Request,
     response: Response,
     current_session: SessionRecord = Depends(get_current_session),
     db: Session = Depends(get_db),
@@ -75,7 +76,7 @@ def logout(
         key=SESSION_COOKIE_NAME,
         path="/",
         httponly=True,
-        secure=True,
+        secure=request.app.state.settings.session_cookie_secure,
         samesite="lax",
     )
     return AuthStatusResponse()

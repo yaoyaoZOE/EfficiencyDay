@@ -13,6 +13,44 @@ def test_auth_settings_defaults() -> None:
     assert settings.initial_password is None
     assert settings.session_ttl_days == 7
     assert settings.public_origin is None
+    assert settings.session_cookie_secure is True
+
+
+@pytest.mark.parametrize("value, expected", [("true", True), ("false", False)])
+def test_session_cookie_security_is_loaded_from_environment(
+    monkeypatch: pytest.MonkeyPatch, value: str, expected: bool
+) -> None:
+    monkeypatch.setenv("EFFICIENCYDAY_SESSION_COOKIE_SECURE", value)
+
+    assert Settings(_env_file=None).session_cookie_secure is expected
+
+
+@pytest.mark.parametrize("value", ["", "invalid"])
+def test_invalid_session_cookie_security_is_rejected(
+    monkeypatch: pytest.MonkeyPatch, value: str
+) -> None:
+    monkeypatch.setenv("EFFICIENCYDAY_SESSION_COOKIE_SECURE", value)
+
+    with pytest.raises(ValidationError):
+        Settings(_env_file=None)
+
+
+def test_compose_forwards_session_cookie_security_with_secure_default() -> None:
+    root = Path(__file__).resolve().parents[2]
+    compose = (root / "docker-compose.yml").read_text(encoding="utf-8")
+
+    assert (
+        '      EFFICIENCYDAY_SESSION_COOKIE_SECURE: "${EFFICIENCYDAY_SESSION_COOKIE_SECURE:-true}"'
+        in compose.split("  frontend:", 1)[0]
+    )
+
+
+@pytest.mark.parametrize("relative_path", [".env.example", "backend/.env.example"])
+def test_env_examples_document_secure_cookie_default(relative_path: str) -> None:
+    root = Path(__file__).resolve().parents[2]
+    example = (root / relative_path).read_text(encoding="utf-8")
+
+    assert "EFFICIENCYDAY_SESSION_COOKIE_SECURE=true" in example.splitlines()
 
 
 def test_session_lifetime_must_be_positive() -> None:

@@ -23,7 +23,7 @@ export function LoginForm({ onLogin }: { onLogin: (user: CurrentUser) => void })
         return await fetchCurrentUser()
       } catch (error) {
         if (error instanceof ApiError && error.status === 401) {
-          throw new Error('登录请求已成功，但未能恢复会话。请使用本机回环地址或 HTTPS，并确认浏览器允许 Cookie。')
+          throw new Error('登录请求已成功，但未能恢复会话。请确认浏览器允许 Cookie，并检查服务端会话 Cookie 配置。建议使用 HTTPS 或本机回环地址；HTTP 不安全模式须由管理员显式启用。')
         }
         throw error
       }

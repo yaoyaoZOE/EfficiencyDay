@@ -19,6 +19,7 @@ class Settings(BaseSettings):
     initial_username: str | None = None
     initial_password: SecretStr | None = None
     session_ttl_days: PositiveInt = 7
+    session_cookie_secure: bool = True
     public_origin: AnyHttpUrl | None = None
 
     @field_validator("public_origin", mode="before")

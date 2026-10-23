@@ -21,6 +21,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(application: FastAPI) -> AsyncIterator[None]:
+        if not settings.session_cookie_secure:
+            logger.warning(
+                "EFFICIENCYDAY_SESSION_COOKIE_SECURE=false: insecure HTTP compatibility mode "
+                "is enabled. Passwords, session tokens, and application data can be intercepted "
+                "over HTTP. Use HTTPS and restore this setting to true for public deployment."
+            )
         engine = create_database_engine(settings)
         application.state.engine = engine
         application.state.session_factory = create_session_factory(engine)

@@ -256,6 +256,8 @@ it('reports rejected browser cookies after a successful login response', async (
   fireEvent.change(screen.getByLabelText('密码'), { target: { value: 'test-password' } })
   fireEvent.click(screen.getByRole('button', { name: '登录' }))
   expect(await screen.findByRole('alert')).toHaveTextContent('未能恢复会话')
+  expect(screen.getByRole('alert')).toHaveTextContent('会话 Cookie 配置')
+  expect(screen.getByRole('alert')).toHaveTextContent('不安全模式')
   expect(screen.getByLabelText('密码')).toHaveValue('')
 })
 
